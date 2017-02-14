@@ -1,4 +1,4 @@
-from dbx import PublicFolder
+from dbx import PublicFolder, IsFileError
 from flask import Flask, Response, abort
 import dropbox
 import logging
@@ -10,13 +10,9 @@ CHUNK_SIZE = 1 << 22
 @app.route("/Public/", methods=['GET'])
 @app.route("/Public/<path:dbx_path>", methods=['GET'])
 def public_folder(dbx_path=''):
-    st = pf.stat(dbx_path)
-    if isinstance(st, dropbox.files.FolderMetadata):
-        return '<br/>'.join(
-            '%s (%s)' % (p, st.__class__.__name__)
-            for p, st in sorted(pf.listdir(dbx_path).items())
-        )
-    else:
+    try:
+        return '<br/>'.join(fn for fn, _ in pf.listdir(dbx_path))
+    except IsFileError:
         resp = pf.download(dbx_path)
         if resp is None:
             abort(404)
