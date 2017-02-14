@@ -132,10 +132,6 @@ class MetadataCache(object):
             for k, v in sorted(node.children.items())
         ]
 
-    def _to_rr(self, path):
-        assert '..' not in path
-        return os.path.join(self._root, path).strip('/')
-
     def _from_rr(self, path):
         # AMERICUH
         assert path.lower().startswith(self._root.lower())
@@ -151,11 +147,11 @@ class PublicFolder(object):
     def download(self, path):
         st = self.cache.stat(path)
         if st is None:
-            return None
+            return None, None
         print("Downloading %s..." % path)
         _, resp = self._dbx.files_download(st.path_display)
         assert resp.ok
-        return resp
+        return st, resp
 
     def listdir(self, path):
         return self.cache.listdir(path)

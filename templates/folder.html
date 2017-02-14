@@ -1,0 +1,13 @@
+<html>
+<head>
+<title>{% block title %}{% endblock %}</title>
+</head>
+<body>
+<h1>{{ title }}</h1>
+<ul>
+{% for fname, entry, url in entries %}
+  <li><a href="{{ url }}">{{ fname }}</a></li>
+{% endfor %}
+</ul>
+</body>
+<html>
