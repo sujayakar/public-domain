@@ -18,12 +18,33 @@ class Directory(object):
         # lowered -> original
         self.orig_names = {}
 
+    def get(self, component):
+        return self.children.get(component.lower())
+
+    def get_or_insert_dir(self, component):
+        cur = self.get(component)
+        if cur is not None:
+            return cur
+        self.children[component.lower()] = cur = Directory()
+        self.orig_names[component.lower()] = component
+        return cur
+
+    def insert(self, filename, entry):
+        assert filename.lower() not in self.children
+        assert filename.lower() not in self.orig_names
+        self.children[filename.lower()] = entry
+        self.orig_names[filename.lower()] = filename
+
+    def drop(self, filename):
+        self.children.pop(filename.lower(), None)
+        self.orig_names.pop(filename.lower(), None)
+
 class MetadataCache(object):
     def __init__(self, dbx, root):
         self._dbx = dbx
         self._root = root
         self._lock = threading.Lock()
-        self._tree = {}
+        self._tree = Directory()
 
         cursor = self._list()
         self._thread = threading.Thread(target=self._list_thread, args=(cursor,))
@@ -48,21 +69,21 @@ class MetadataCache(object):
                     if not path:
                         assert isinstance(entry, dropbox.files.FolderMetadata)
                         continue
-                    parent_node, filename_l = self._merge_parent(path)
+                    parent_node, filename = self._merge_parent(path)
                     if isinstance(entry, dropbox.files.FileMetadata):
-                        if filename_l in parent_node:
-                            del parent_node[filename_l]
-                        parent_node[filename_l] = entry
+                        if parent_node.get(filename):
+                            parent_node.drop(filename)
+                        parent_node.insert(filename, entry)
                     elif isinstance(entry, dropbox.files.FolderMetadata):
-                        if filename_l in parent_node:
-                            cur_entry = parent_node[filename_l]
+                        cur_entry = parent_node.get(filename)
+                        if cur_entry is not None:
                             if isinstance(cur_entry, dropbox.files.FileMetadata):
-                                del parent_node[filename_l]
+                                parent_node.drop(filename)
                         else:
-                            parent_node[filename_l] = {}
+                            parent_node.insert(filename, Directory())
                     else:
                         assert isinstance(entry, dropbox.files.DeletedMetadata)
-                        parent_node.pop(filename_l, None)
+                        parent_node.drop(filename)
 
             cursor = resp.cursor
             if not resp.has_more:
@@ -78,55 +99,38 @@ class MetadataCache(object):
                 cursor = self._list(cursor)
 
     def _merge_parent(self, path):
-        path = path.strip('/')
-        assert path
+        components = path.strip('/').split('/')
+        assert components
         node = self._tree
-        components = path.lower().split('/')
         for component in components[:-1]:
-            if component not in node:
-                node[component] = {}
-            node = node[component]
+            node = node.get_or_insert_dir(component)
+            if not isinstance(node, Directory):
+                raise Exception("Path %s underneath file" % path)
         return node, components[-1]
 
-    def stat(self, path):
+    def _find(self, path):
         path = path.strip('/')
-        if not path:
-            raise Exception("Can't stat root directory")
-        assert path
-        with self._lock:
-            node = self._tree
-            for component in path.lower().split('/'):
-                if component not in node:
-                    return None
-                node = node[component]
+        node = self._tree
+        if path:
+            with self._lock:
+                for component in path.split('/'):
+                    node = node.get(component)
+        return node
 
+    def stat(self, path):
+        node = self._find(path)
         if not isinstance(node, dropbox.files.FileMetadata):
             raise IsDirError("Can only stat files")
-
         return node
 
     def listdir(self, path):
-        path = path.strip('/')
-        with self._lock:
-            node = self._tree
-            if path:
-                for component in path.lower().split('/'):
-                    if component not in node:
-                        return None
-                    node = node[component]
-        if not isinstance(node, dict):
-            raise IsFileError("Can only list directories")
-
-        result = []
-        for key in sorted(node.keys()):
-            entry = node[key]
-            if isinstance(entry, dict):
-                # XXX
-                fn, entry = key, Directory
-            else:
-                fn, entry = entry.path_display.split('/')[-1], entry
-            result.append((fn, entry))
-        return result
+        node = self._find(path)
+        if not isinstance(node, Directory):
+            raise IsFileError("Can only list directories: '%s', %s" % (path, node))
+        return [
+            (node.orig_names[k], v)
+            for k, v in sorted(node.children.items())
+        ]
 
     def _to_rr(self, path):
         assert '..' not in path
