@@ -9,19 +9,21 @@ import web
 
 app = Flask(__name__)
 root = '/Public'
-pf = DBXFolder(root, '/home/sujayakar/secret.json')
-etags = web.ETagCache(pf)
-templinks = web.TempLinkCache(pf)
+dbx_folder = DBXFolder(root, '/home/sujayakar/secret.json')
+etags = web.ETagCache(dbx_folder)
+templinks = web.TempLinkCache(dbx_folder)
 CHUNK_SIZE = 1 << 22
 
-@app.route("/Public/", methods=['GET'])
-@app.route("/Public/<path:dbx_path>", methods=['GET'])
-def public_folder(dbx_path=''):
+assert root.startswith('/') and not root.endswith('/')
+
+@app.route("%s/" % root, methods=['GET'])
+@app.route("%s/<path:dbx_path>" % root, methods=['GET'])
+def list_folder(dbx_path=''):
     try:
-        title = os.path.join('Public/', dbx_path)
+        title = os.path.join(root, dbx_path)
         entries = [
-            (fname, ent, os.path.join('/Public', dbx_path, fname))
-            for fname, ent in pf.listdir(dbx_path)
+            (fname, ent, os.path.join(root, dbx_path, fname))
+            for fname, ent in dbx_folder.listdir(dbx_path)
         ]
         return render_template("folder.html", title=title, entries=entries)
     except IsFileError:
@@ -37,11 +39,10 @@ def public_folder(dbx_path=''):
         return simple_download(dbx_path)
 
 def simple_download(dbx_path):
-    st, resp = pf.download(dbx_path)
+    st, resp = dbx_folder.download(dbx_path)
     if resp is None:
         return Response(status=404)
 
-    # TODO: support range requests
     headers = {
         'Content-Length': resp.headers['Content-Length'],
         'ETag': resp.headers['ETag'],

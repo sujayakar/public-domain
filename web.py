@@ -2,9 +2,9 @@ import threading
 import time
 
 class ETagCache(object):
-    def __init__(self, pf):
+    def __init__(self, dbx_folder):
         self._lock = threading.Lock()
-        self._pf = pf
+        self._dbx_folder = dbx_folder
         self._cache = {}
 
     def register(self, path, st, tag):
@@ -23,7 +23,7 @@ class ETagCache(object):
                 return False
 
             # Next, check that the cur_tag is itself current
-            st = self._pf.cache.stat(path)
+            st = self._dbx_folder.cache.stat(path)
             if st is None or st.rev != cur_rev:
                 del self._cache[path]
                 return False
@@ -33,13 +33,13 @@ class ETagCache(object):
 class TempLinkCache(object):
     EXPIRATION = 60 * 60 * 3
 
-    def __init__(self, pf):
+    def __init__(self, dbx_folder):
         self._lock = threading.Lock()
-        self._pf = pf
+        self._dbx_folder = dbx_folder
         self._cache = {}
 
     def get(self, path):
-        st = self._pf.cache.stat(path)
+        st = self._dbx_folder.cache.stat(path)
         if st is None:
             return None
 
@@ -54,7 +54,7 @@ class TempLinkCache(object):
                 pass
 
         print("Fetching templink for %s..." % path)
-        url = self._pf._dbx.files_get_temporary_link(st.path_display).link
+        url = self._dbx_folder._dbx.files_get_temporary_link(st.path_display).link
         with self._lock:
             expiration = time.time() + self.EXPIRATION
             self._cache[path] = (st.rev, expiration, url)
