@@ -138,10 +138,11 @@ class MetadataCache(object):
         return path[len(self._root):]
 
 class DBXFolder(object):
-    def __init__(self, root, secret_file):
-        secret = json.load(open(secret_file))
-        self._dbx = dropbox.Dropbox(secret['access_token'])
-        self._root = root
+    def __init__(self, config_file):
+        config = json.load(open(config_file))
+        self._root = config['root']
+        assert self._root.startswith('/') and not self._root.endswith('/')
+        self._dbx = dropbox.Dropbox(config['access_token'])
         self.cache = MetadataCache(self._dbx, self._root)
 
     def download(self, path):

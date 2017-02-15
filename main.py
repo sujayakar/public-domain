@@ -3,18 +3,16 @@ from flask import Flask, Response, abort, render_template, redirect, request
 import dropbox
 import logging
 import mimetypes
-import os.path
+import os
 import requests
 import web
 
 app = Flask(__name__)
-root = '/Public'
-dbx_folder = DBXFolder(root, '/home/sujayakar/secret.json')
+dbx_folder = DBXFolder('/home/sujayakar/config.json')
+root = dbx_folder._root
 etags = web.ETagCache(dbx_folder)
 templinks = web.TempLinkCache(dbx_folder)
 CHUNK_SIZE = 1 << 22
-
-assert root.startswith('/') and not root.endswith('/')
 
 @app.route("%s/" % root, methods=['GET'])
 @app.route("%s/<path:dbx_path>" % root, methods=['GET'])
@@ -27,7 +25,6 @@ def list_folder(dbx_path=''):
         ]
         return render_template("folder.html", title=title, entries=entries)
     except IsFileError:
-        print('Download headers: %s' % dict(request.headers))
         etag = request.headers.get('If-None-Match')
         if etag is not None and etags.is_current(dbx_path, etag):
             print('Cache hit on %s!' % (dbx_path,))
