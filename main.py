@@ -1,4 +1,4 @@
-from dbx import DBXFolder, IsFileError
+from dbx import DBXFolder, IsDirError, IsFileError
 from flask import Flask, Response, abort, render_template, redirect, request
 import dropbox
 import logging
@@ -21,11 +21,14 @@ def list_folder(dbx_path=''):
     try:
         title = os.path.join(config['root'], dbx_path)
         entries = [
-            (fname, ent, os.path.join(dbx_path, fname))
+            (fname, ent, '/' + os.path.join(dbx_path, fname))
             for fname, ent in dbx_folder.listdir(dbx_path)
         ]
         return render_template("folder.html", title=title, entries=entries)
     except IsFileError:
+        pass
+
+    try:
         etag = request.headers.get('If-None-Match')
         if etag is not None and etags.is_current(dbx_path, etag):
             print('Etag cache hit on %s!' % (dbx_path,))
@@ -36,6 +39,8 @@ def list_folder(dbx_path=''):
             return range_download(dbx_path)
 
         return simple_download(dbx_path)
+    except IsDirError:
+        return Response(status=404)
 
 def simple_download(dbx_path):
     res = blockcache.get(dbx_path)
