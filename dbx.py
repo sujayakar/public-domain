@@ -1,6 +1,5 @@
 import collections
 import dropbox
-import json
 import logging
 import os
 import threading
@@ -42,7 +41,7 @@ class Directory(object):
 class MetadataCache(object):
     def __init__(self, dbx, root):
         self._dbx = dbx
-        self._root = root
+        self._root = root if root != '/' else ''
         self._lock = threading.Lock()
         self._tree = Directory()
 
@@ -114,6 +113,8 @@ class MetadataCache(object):
         if path:
             with self._lock:
                 for component in path.split('/'):
+                    if node is None:
+                        return None
                     node = node.get(component)
         return node
 
@@ -138,10 +139,10 @@ class MetadataCache(object):
         return path[len(self._root):]
 
 class DBXFolder(object):
-    def __init__(self, config_file):
-        config = json.load(open(config_file))
+    def __init__(self, config):
         self._root = config['root']
-        assert self._root.startswith('/') and not self._root.endswith('/')
+        if self._root != '/':
+            assert self._root.startswith('/') and not self._root.endswith('/')
         self._dbx = dropbox.Dropbox(config['access_token'])
         self.cache = MetadataCache(self._dbx, self._root)
 

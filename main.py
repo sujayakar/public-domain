@@ -8,19 +8,20 @@ import requests
 import web
 
 app = Flask(__name__)
-dbx_folder = DBXFolder('/home/sujayakar/config.json')
-root = dbx_folder._root
+config = web.Config('config.json')
+dbx_folder = DBXFolder(config)
 etags = web.ETagCache(dbx_folder)
 templinks = web.TempLinkCache(dbx_folder)
 CHUNK_SIZE = 1 << 22
 
-@app.route("%s/" % root, methods=['GET'])
-@app.route("%s/<path:dbx_path>" % root, methods=['GET'])
+@app.route("/", methods=['GET'])
+@app.route("/<path:dbx_path>", methods=['GET'])
 def list_folder(dbx_path=''):
+    print('dbx_path: %s' % dbx_path)
     try:
-        title = os.path.join(root, dbx_path)
+        title = os.path.join(config['root'], dbx_path)
         entries = [
-            (fname, ent, os.path.join(root, dbx_path, fname))
+            (fname, ent, os.path.join(dbx_path, fname))
             for fname, ent in dbx_folder.listdir(dbx_path)
         ]
         return render_template("folder.html", title=title, entries=entries)

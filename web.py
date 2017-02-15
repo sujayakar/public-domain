@@ -1,5 +1,13 @@
+import json
 import threading
 import time
+
+class Config(object):
+    def __init__(self, config_file):
+        self._raw = json.load(open(config_file))
+
+    def __getitem__(self, key):
+        return self._raw[key]
 
 class ETagCache(object):
     def __init__(self, dbx_folder):
@@ -60,18 +68,3 @@ class TempLinkCache(object):
             self._cache[path] = (st.rev, expiration, url)
 
         return url
-
-def parse_range(range_hdr):
-    assert range_hdr.startswith('bytes=')
-    payload = range_hdr.partition('bytes=')[2].strip()
-    assert payload.count('-') == 1
-    lower, _, upper = payload.partition('-')
-    if not lower:
-        lower = None
-    else:
-        lower = int(lower)
-    if not upper:
-        upper = None
-    else:
-        upper = int(upper)
-    return (lower, upper)

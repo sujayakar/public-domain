@@ -90,3 +90,5 @@ ENV/
 
 # Emacs
 *~
+
+config.json
