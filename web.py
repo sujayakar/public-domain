@@ -1,4 +1,5 @@
 import threading
+import time
 
 class ETagCache(object):
     def __init__(self, pf):
@@ -28,3 +29,49 @@ class ETagCache(object):
                 return False
 
             return True
+
+class TempLinkCache(object):
+    EXPIRATION = 60 * 60 * 3
+
+    def __init__(self, pf):
+        self._lock = threading.Lock()
+        self._pf = pf
+        self._cache = {}
+
+    def get(self, path):
+        st = self._pf.cache.stat(path)
+        if st is None:
+            return None
+
+        with self._lock:
+            try:
+                cur_rev, expires, url = self._cache[path]
+                if st.rev == cur_rev and time.time() < expires:
+                    return url
+                else:
+                    del self._cache[path]
+            except KeyError:
+                pass
+
+        print("Fetching templink for %s..." % path)
+        url = self._pf._dbx.files_get_temporary_link(st.path_display).link
+        with self._lock:
+            expiration = time.time() + self.EXPIRATION
+            self._cache[path] = (st.rev, expiration, url)
+
+        return url
+
+def parse_range(range_hdr):
+    assert range_hdr.startswith('bytes=')
+    payload = range_hdr.partition('bytes=')[2].strip()
+    assert payload.count('-') == 1
+    lower, _, upper = payload.partition('-')
+    if not lower:
+        lower = None
+    else:
+        lower = int(lower)
+    if not upper:
+        upper = None
+    else:
+        upper = int(upper)
+    return (lower, upper)

@@ -1,15 +1,17 @@
-from dbx import PublicFolder, IsFileError
-from flask import Flask, Response, abort, render_template, request
+from dbx import DBXFolder, IsFileError
+from flask import Flask, Response, abort, render_template, redirect, request
 import dropbox
 import logging
 import mimetypes
 import os.path
+import requests
 import web
 
 app = Flask(__name__)
 root = '/Public'
 pf = DBXFolder(root, '/home/sujayakar/secret.json')
 etags = web.ETagCache(pf)
+templinks = web.TempLinkCache(pf)
 CHUNK_SIZE = 1 << 22
 
 @app.route("/Public/", methods=['GET'])
@@ -23,24 +25,22 @@ def public_folder(dbx_path=''):
         ]
         return render_template("folder.html", title=title, entries=entries)
     except IsFileError:
+        print('Download headers: %s' % dict(request.headers))
         etag = request.headers.get('If-None-Match')
         if etag is not None and etags.is_current(dbx_path, etag):
+            print('Cache hit on %s!' % (dbx_path,))
             return Response(status=304)
+
+        req_range = request.headers.get('Range')
+        if req_range is not None:
+            return range_download(dbx_path, req_range)
+
         return simple_download(dbx_path)
 
 def simple_download(dbx_path):
     st, resp = pf.download(dbx_path)
     if resp is None:
-        print('Cache hit on %s!' % (dbx_path,))
         return Response(status=404)
-
-    def generate(resp):
-        try:
-            for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
-                print("Received chunk of size %d" % len(chunk))
-                yield chunk
-        finally:
-            resp.close()
 
     # TODO: support range requests
     headers = {
@@ -57,4 +57,44 @@ def simple_download(dbx_path):
     else:
         headers['Content-Type'] = resp.headers['Content-Type']
         headers['Content-Disposition'] = 'attachment'
-    return Response(generate(resp), headers=headers)
+    return Response(generate(dbx_path, resp), headers=headers)
+
+def range_download(dbx_path, range_hdr):
+    url = templinks.get(dbx_path)
+    if url is None:
+        return Response(status=404)
+    # Why bother? Just let the client figure it out since latency doesn't matter.
+    return redirect(url, code=302)
+
+    lower, upper = web.parse_range(range_hdr)
+    lower = lower or 0
+    upper = upper or (lower + 16 * CHUNK_SIZE)
+    req_headers = {
+        'Range': 'bytes=%d-%d' % (lower, upper),
+        'Connection': 'close',
+    }
+    resp = requests.get(url, headers=req_headers)
+    if not resp.headers['Accept-Ranges'] == 'bytes':
+        raise Exception("Failed to stream %s" % dbx_path)
+
+    # print('Received range headers %s' % (resp.headers,))
+    # Skipping ETags on response since we don't want to store range ETags
+    resp_headers = {
+        'Accept-Ranges': 'bytes',
+        'Connection': 'close',
+        'Content-Length': resp.headers['Content-Length'],
+        'Content-Type': resp.headers['Content-Type'],
+        'Content-Disposition': resp.headers['Content-Disposition'],
+        'Content-Range': resp.headers['Content-Range'],
+    }
+    return Response(response=generate(dbx_path, resp),
+                    status=206,
+                    headers=resp_headers)
+
+def generate(dbx_path, resp):
+    try:
+        for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
+            print("Received chunk of size %d for %s" % (len(chunk), dbx_path))
+            yield chunk
+    finally:
+        resp.close()
