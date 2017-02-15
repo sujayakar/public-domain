@@ -7,7 +7,8 @@ import os.path
 import web
 
 app = Flask(__name__)
-pf = PublicFolder('/home/sujayakar/secret.json')
+root = '/Public'
+pf = DBXFolder(root, '/home/sujayakar/secret.json')
 etags = web.ETagCache(pf)
 CHUNK_SIZE = 1 << 22
 

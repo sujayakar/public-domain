@@ -137,11 +137,11 @@ class MetadataCache(object):
         assert path.lower().startswith(self._root.lower())
         return path[len(self._root):]
 
-class PublicFolder(object):
-    def __init__(self, secret_file):
+class DBXFolder(object):
+    def __init__(self, root, secret_file):
         secret = json.load(open(secret_file))
         self._dbx = dropbox.Dropbox(secret['access_token'])
-        self._root = '/Public'
+        self._root = root
         self.cache = MetadataCache(self._dbx, self._root)
 
     def download(self, path):
