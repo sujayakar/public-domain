@@ -1,3 +1,4 @@
+from queue import Queue
 import collections
 import dropbox
 import logging
@@ -44,9 +45,9 @@ class MetadataCache(object):
         self._root = root if root != '/' else ''
         self._lock = threading.Lock()
         self._tree = Directory()
+        self._dirty_queue = Queue()
 
-        cursor = self._list()
-        self._thread = threading.Thread(target=self._list_thread, args=(cursor,))
+        self._thread = threading.Thread(target=self._list_thread)
         self._thread.daemon = True
         self._thread.start()
 
@@ -64,6 +65,7 @@ class MetadataCache(object):
             with self._lock:
                 for entry in resp.entries:
                     path = self._from_rr(entry.path_display)
+                    self._dirty_queue.put(path)
                     # Root we're currently listing
                     if not path:
                         assert isinstance(entry, dropbox.files.FolderMetadata)
@@ -88,13 +90,14 @@ class MetadataCache(object):
             if not resp.has_more:
                 return cursor
 
-    def _list_thread(self, cursor):
+    def _list_thread(self, cursor=None):
         while True:
-            resp = self._dbx.files_list_folder_longpoll(cursor)
-            print("Woke up from subscribe, listing...")
-            if resp.backoff:
-                time.sleep(resp.backoff)
-            if resp.changes:
+            if cursor is not None:
+                resp = self._dbx.files_list_folder_longpoll(cursor)
+                print("Woke up from subscribe, listing...")
+                if resp.backoff:
+                    time.sleep(resp.backoff)
+            if cursor is None or resp.changes:
                 cursor = self._list(cursor)
 
     def _merge_parent(self, path):

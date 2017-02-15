@@ -4,6 +4,8 @@ import os
 import threading
 import time
 
+from dbx import IsDirError
+
 class Config(object):
     def __init__(self, config_file):
         self._raw = json.load(open(config_file))
@@ -75,6 +77,7 @@ class BlockCache(object):
     def __init__(self, dbx, config):
         self._dbx = dbx
         self._cache_dir = config['blockcache']
+        self._prefetch_size = config['prefetch'] * (1 << 10)
         self._cacheable_size = config['cacheable'] * (1 << 20)
         self._max_size = config['cache_size'] * (1 << 20)
         self._chunk_size = config['chunk_size'] * (1 << 20)
@@ -86,6 +89,14 @@ class BlockCache(object):
         # path -> (rev, size, last access, resp_headers, diskpath)
         self._cache = {}
         self._size = 0
+
+        self._dirty_queue = dbx.cache._dirty_queue
+        self._threads = []
+        for _ in range(config['prefetch_threads']):
+            t = threading.Thread(target=self._prefetch_loop)
+            self._threads.append(t)
+            t.daemon = True
+            t.start()
 
     def get(self, path):
         """
@@ -130,6 +141,34 @@ class BlockCache(object):
 
         return st, resp_headers, write_cache(resp_headers, stream)
 
+    def prime(self, path):
+        st = self._dbx.cache.stat(path)
+        if st is None:
+            return
+
+        if st.size > self._prefetch_size:
+            return
+
+        with self._lock:
+            if self._lookup(path, st) is not None:
+                return
+
+        print("Priming %s..." % path)
+        res = self.get(path)
+        if res is None:
+            return
+        _, _, stream = res
+        # Drain the stream so it fills the cache
+        for block in stream:
+            pass
+
+    def _prefetch_loop(self):
+        while True:
+            try:
+                self.prime(self._dirty_queue.get())
+            except IsDirError:
+                pass
+
     def _download(self, st):
         resp = self._dbx.download(st)
         resp_headers = {
@@ -153,7 +192,7 @@ class BlockCache(object):
         if path not in self._cache:
             return
 
-        _, size, _, p = self._cache.pop(path)
+        _, size, _, _, p = self._cache.pop(path)
         print("Cache evicted %s (%0.2f KiB)" % (path, size / float(1 << 10)))
         os.unlink(p)
         self._size -= size
