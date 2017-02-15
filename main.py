@@ -14,8 +14,6 @@ CHUNK_SIZE = 1 << 22
 @app.route("/Public/", methods=['GET'])
 @app.route("/Public/<path:dbx_path>", methods=['GET'])
 def public_folder(dbx_path=''):
-    print('Request headers: %s' % (dict(request.headers),))
-    print('Request environ: %s' % (request.environ,))
     try:
         title = os.path.join('Public/', dbx_path)
         entries = [
@@ -32,6 +30,7 @@ def public_folder(dbx_path=''):
 def simple_download(dbx_path):
     st, resp = pf.download(dbx_path)
     if resp is None:
+        print('Cache hit on %s!' % (dbx_path,))
         return Response(status=404)
 
     def generate(resp):
@@ -42,9 +41,7 @@ def simple_download(dbx_path):
         finally:
             resp.close()
 
-    print('Download headers: %s' % (dict(resp.headers),))
     # TODO: support range requests
-    # TODO: pipeline downloads
     headers = {
         'Content-Length': resp.headers['Content-Length'],
         'ETag': resp.headers['ETag'],
