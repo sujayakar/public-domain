@@ -31,8 +31,7 @@ def public_folder(dbx_path=''):
             print('Cache hit on %s!' % (dbx_path,))
             return Response(status=304)
 
-        req_range = request.headers.get('Range')
-        if req_range is not None:
+        if request.headers.get('Range'):
             return range_download(dbx_path, req_range)
 
         return simple_download(dbx_path)
@@ -63,33 +62,9 @@ def range_download(dbx_path, range_hdr):
     url = templinks.get(dbx_path)
     if url is None:
         return Response(status=404)
-    # Why bother? Just let the client figure it out since latency doesn't matter.
+    # Why bother wasting our bandwidth? Just let the client figure it out
+    # since latency doesn't matter.
     return redirect(url, code=302)
-
-    lower, upper = web.parse_range(range_hdr)
-    lower = lower or 0
-    upper = upper or (lower + 16 * CHUNK_SIZE)
-    req_headers = {
-        'Range': 'bytes=%d-%d' % (lower, upper),
-        'Connection': 'close',
-    }
-    resp = requests.get(url, headers=req_headers)
-    if not resp.headers['Accept-Ranges'] == 'bytes':
-        raise Exception("Failed to stream %s" % dbx_path)
-
-    # print('Received range headers %s' % (resp.headers,))
-    # Skipping ETags on response since we don't want to store range ETags
-    resp_headers = {
-        'Accept-Ranges': 'bytes',
-        'Connection': 'close',
-        'Content-Length': resp.headers['Content-Length'],
-        'Content-Type': resp.headers['Content-Type'],
-        'Content-Disposition': resp.headers['Content-Disposition'],
-        'Content-Range': resp.headers['Content-Range'],
-    }
-    return Response(response=generate(dbx_path, resp),
-                    status=206,
-                    headers=resp_headers)
 
 def generate(dbx_path, resp):
     try:
