@@ -28,10 +28,11 @@ def list_folder(dbx_path=''):
     except IsFileError:
         etag = request.headers.get('If-None-Match')
         if etag is not None and etags.is_current(dbx_path, etag):
-            print('Cache hit on %s!' % (dbx_path,))
+            print('Etag cache hit on %s!' % (dbx_path,))
             return Response(status=304)
 
         if request.headers.get('Range'):
+            print("Serving range response for %s" % (dbx_path,))
             return range_download(dbx_path)
 
         return simple_download(dbx_path)

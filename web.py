@@ -114,6 +114,7 @@ class BlockCache(object):
         # evicting other entries.  If we fail after allocating, we'll leak space
         # in the cache.
         with self._lock:
+            # XXX: This isn't quite right (round up to 4kb)
             self._allocate(st.size)
 
         # Stream the file in and write it to disk
@@ -134,6 +135,9 @@ class BlockCache(object):
         resp_headers = {
             'Content-Length': resp.headers['Content-Length'],
             'ETag': resp.headers['ETag'],
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
         }
         def stream(resp):
             try:
@@ -150,6 +154,7 @@ class BlockCache(object):
             return
 
         _, size, _, p = self._cache.pop(path)
+        print("Cache evicted %s (%0.2f KiB)" % (path, size / float(1 << 10)))
         os.unlink(p)
         self._size -= size
         return size
@@ -188,6 +193,8 @@ class BlockCache(object):
                 )
                 to_free -= self._clear(key)
         self._size += size
+        print("Cache allocated %0.2f KiB (total size %0.2fMiB)" % (
+            size / float(1 << 10), self._size / float(1 << 20)))
 
     def _cache_name(self, st):
         h = hashlib.md5(st.path_display.encode('utf-8'))
