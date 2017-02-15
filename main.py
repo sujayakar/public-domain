@@ -32,7 +32,7 @@ def public_folder(dbx_path=''):
             return Response(status=304)
 
         if request.headers.get('Range'):
-            return range_download(dbx_path, req_range)
+            return range_download(dbx_path)
 
         return simple_download(dbx_path)
 
@@ -58,7 +58,7 @@ def simple_download(dbx_path):
         headers['Content-Disposition'] = 'attachment'
     return Response(generate(dbx_path, resp), headers=headers)
 
-def range_download(dbx_path, range_hdr):
+def range_download(dbx_path):
     url = templinks.get(dbx_path)
     if url is None:
         return Response(status=404)
