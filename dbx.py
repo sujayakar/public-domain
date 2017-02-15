@@ -146,14 +146,12 @@ class DBXFolder(object):
         self._dbx = dropbox.Dropbox(config['access_token'])
         self.cache = MetadataCache(self._dbx, self._root)
 
-    def download(self, path):
-        st = self.cache.stat(path)
+    def download(self, st):
         if st is None:
-            return None, None
-        print("Downloading %s..." % path)
+            return None
         _, resp = self._dbx.files_download(st.path_display)
         assert resp.ok
-        return st, resp
+        return resp
 
     def listdir(self, path):
         return self.cache.listdir(path)

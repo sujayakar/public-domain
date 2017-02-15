@@ -1,4 +1,9 @@
 {
     "root": "/Public",
     "access_token": "PUT YOURS HERE",
+
+    "blockcache": "/mnt/blockcache",
+    "cacheable": 4,
+    "chunk_size": 4,
+    "cache_size": 128
 }

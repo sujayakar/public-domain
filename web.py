@@ -1,4 +1,6 @@
+import hashlib
 import json
+import os
 import threading
 import time
 
@@ -68,3 +70,126 @@ class TempLinkCache(object):
             self._cache[path] = (st.rev, expiration, url)
 
         return url
+
+class BlockCache(object):
+    def __init__(self, dbx, config):
+        self._dbx = dbx
+        self._cache_dir = config['blockcache']
+        self._cacheable_size = config['cacheable'] * (1 << 20)
+        self._max_size = config['cache_size'] * (1 << 20)
+        self._chunk_size = config['chunk_size'] * (1 << 20)
+
+        for p in os.listdir(self._cache_dir):
+            os.unlink(os.path.join(self._cache_dir, p))
+
+        self._lock = threading.Lock()
+        # path -> (rev, size, last access, resp_headers, diskpath)
+        self._cache = {}
+        self._size = 0
+
+    def get(self, path):
+        """
+        Returns Option<(st, headers, content generator)>
+        """
+        st = self._dbx.cache.stat(path)
+        if st is None:
+            with self._lock:
+                self._clear(path)
+            return None
+
+        with self._lock:
+            cache_result = self._lookup(path, st)
+        if cache_result is not None:
+            print('Block cache hit on %s!' % path)
+            headers, diskfd = cache_result
+            return st, headers, self._stream_file(diskfd)
+
+        # Too big to cache
+        if st.size > self._cacheable_size:
+            print('%s too big to cache' % path)
+            resp_headers, stream = self._download(st)
+            return st, resp_headers, stream
+
+        # Okay, let's cache this.  We need to reserve our space, potentially
+        # evicting other entries.  If we fail after allocating, we'll leak space
+        # in the cache.
+        with self._lock:
+            self._allocate(st.size)
+
+        # Stream the file in and write it to disk
+        resp_headers, stream = self._download(st)
+        def write_cache(resp_headers, stream):
+            p = os.path.join(self._cache_dir, self._cache_name(st))
+            with open(p, 'wb') as f:
+                for chunk in stream:
+                    f.write(chunk)
+                    yield chunk
+            with self._lock:
+                self._cache[path] = (st.rev, st.size, time.time(), resp_headers, p)
+
+        return st, resp_headers, write_cache(resp_headers, stream)
+
+    def _download(self, st):
+        resp = self._dbx.download(st)
+        resp_headers = {
+            'Content-Length': resp.headers['Content-Length'],
+            'ETag': resp.headers['ETag'],
+        }
+        def stream(resp):
+            try:
+                for chunk in resp.iter_content(chunk_size=self._chunk_size):
+                    print("Received chunk of size %d for %s" % (
+                        len(chunk), st.path_display))
+                    yield chunk
+            finally:
+                resp.close()
+        return resp_headers, stream(resp)
+
+    def _clear(self, path):
+        if path not in self._cache:
+            return
+
+        _, size, _, p = self._cache.pop(path)
+        os.unlink(p)
+        self._size -= size
+        return size
+
+    def _lookup(self, path, st):
+        try:
+            (rev, size, last_access, resp_headers, p) = self._cache[path]
+        except KeyError:
+            return None
+
+        if st.rev != rev:
+            self._clear(path)
+            return None
+
+        self._cache[path] = (rev, size, time.time(), resp_headers, p)
+        return resp_headers, open(p, 'rb')
+
+    def _stream_file(self, fd):
+        try:
+            while True:
+                buf = fd.read(self._chunk_size)
+                if not buf:
+                    break
+                yield buf
+        finally:
+            fd.close()
+
+    def _allocate(self, size):
+        target_size = self._size + size
+        if target_size > self._max_size:
+            to_free = target_size - self._max_size
+            while to_free > 0:
+                _, key = min(
+                    (last_access, key)
+                    for key, (_, _, last_access, _, _) in self._cache.iteritems()
+                )
+                to_free -= self._clear(key)
+        self._size += size
+
+    def _cache_name(self, st):
+        h = hashlib.md5(st.path_display.encode('utf-8'))
+        h.update(st.rev.encode('utf-8'))
+        return h.hexdigest()

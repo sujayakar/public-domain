@@ -12,12 +12,12 @@ config = web.Config('config.json')
 dbx_folder = DBXFolder(config)
 etags = web.ETagCache(dbx_folder)
 templinks = web.TempLinkCache(dbx_folder)
+blockcache = web.BlockCache(dbx_folder, config)
 CHUNK_SIZE = 1 << 22
 
 @app.route("/", methods=['GET'])
 @app.route("/<path:dbx_path>", methods=['GET'])
 def list_folder(dbx_path=''):
-    print('dbx_path: %s' % dbx_path)
     try:
         title = os.path.join(config['root'], dbx_path)
         entries = [
@@ -37,15 +37,11 @@ def list_folder(dbx_path=''):
         return simple_download(dbx_path)
 
 def simple_download(dbx_path):
-    st, resp = dbx_folder.download(dbx_path)
-    if resp is None:
+    res = blockcache.get(dbx_path)
+    if res is None:
         return Response(status=404)
-
-    headers = {
-        'Content-Length': resp.headers['Content-Length'],
-        'ETag': resp.headers['ETag'],
-    }
-    etags.register(dbx_path, st, resp.headers['ETag'])
+    st, headers, stream = res
+    etags.register(dbx_path, st, headers['ETag'])
 
     filename = os.path.basename(st.path_display)
     mime_type, _ = mimetypes.guess_type(filename)
@@ -53,9 +49,8 @@ def simple_download(dbx_path):
         headers['Content-Type'] = mime_type
         headers['Content-Disposition'] = 'inline'
     else:
-        headers['Content-Type'] = resp.headers['Content-Type']
         headers['Content-Disposition'] = 'attachment'
-    return Response(generate(dbx_path, resp), headers=headers)
+    return Response(stream, headers=headers)
 
 def range_download(dbx_path):
     url = templinks.get(dbx_path)
@@ -64,11 +59,3 @@ def range_download(dbx_path):
     # Why bother wasting our bandwidth? Just let the client figure it out
     # since latency doesn't matter.
     return redirect(url, code=302)
-
-def generate(dbx_path, resp):
-    try:
-        for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
-            print("Received chunk of size %d for %s" % (len(chunk), dbx_path))
-            yield chunk
-    finally:
-        resp.close()
