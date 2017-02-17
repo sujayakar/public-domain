@@ -51,6 +51,9 @@ class MetadataCache(object):
         self._thread.daemon = True
         self._thread.start()
 
+        self._cursor = None
+        self._cursor_changed = threading.Condition(self._lock)
+
     def _list(self, cursor=None):
         while True:
             if cursor is None:
@@ -86,9 +89,12 @@ class MetadataCache(object):
                         assert isinstance(entry, dropbox.files.DeletedMetadata)
                         parent_node.drop(filename)
 
-            cursor = resp.cursor
-            if not resp.has_more:
-                return cursor
+                # Publish the new cursor to the rest of the system
+                cursor = self._cursor = resp.cursor
+                self._cursor_changed.notifyAll()
+
+                if not resp.has_more:
+                    return cursor
 
     def _list_thread(self, cursor=None):
         while True:
@@ -114,27 +120,29 @@ class MetadataCache(object):
         path = path.strip('/')
         node = self._tree
         if path:
-            with self._lock:
-                for component in path.split('/'):
-                    if node is None:
-                        return None
-                    node = node.get(component)
+            for component in path.split('/'):
+                if node is None:
+                    return None
+                node = node.get(component)
         return node
 
     def stat(self, path):
-        node = self._find(path)
+        with self._lock:
+            node = self._find(path)
         if not isinstance(node, dropbox.files.FileMetadata):
             raise IsDirError("Can only stat files")
         return node
 
     def listdir(self, path):
-        node = self._find(path)
-        if not isinstance(node, Directory):
-            raise IsFileError("Can only list directories: '%s', %s" % (path, node))
-        return [
-            (node.orig_names[k], v)
-            for k, v in sorted(node.children.items())
-        ]
+        with self._lock:
+            node = self._find(path)
+            if not isinstance(node, Directory):
+                raise IsFileError("Can only list directories: '%s', %s" % (path, node))
+            children = [
+                (node.orig_names[k], v)
+                for k, v in sorted(node.children.items())
+            ]
+            return children, self._cursor
 
     def _from_rr(self, path):
         # AMERICUH
@@ -158,3 +166,11 @@ class DBXFolder(object):
 
     def listdir(self, path):
         return self.cache.listdir(path)
+
+    def subscribe(self, cursor):
+        with self.cache._lock:
+            if cursor != self.cache._cursor:
+                return True
+
+            self.cache._cursor_changed.wait(15.)
+            return cursor != self.cache._cursor

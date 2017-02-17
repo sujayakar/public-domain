@@ -1,6 +1,7 @@
 from dbx import DBXFolder, IsDirError, IsFileError
 from flask import Flask, Response, abort, render_template, redirect, request
 import dropbox
+import json
 import logging
 import mimetypes
 import os
@@ -15,16 +16,18 @@ templinks = web.TempLinkCache(dbx_folder)
 blockcache = web.BlockCache(dbx_folder, config)
 CHUNK_SIZE = 1 << 22
 
-@app.route("/", methods=['GET'])
-@app.route("/<path:dbx_path>", methods=['GET'])
+@app.route("/Public/", methods=['GET'])
+@app.route("/Public/<path:dbx_path>", methods=['GET'])
 def list_folder(dbx_path=''):
     try:
         title = os.path.join(config['root'], dbx_path)
+        children, cursor = dbx_folder.listdir(dbx_path)
         entries = [
             (fname, ent, '/' + os.path.join(dbx_path, fname))
-            for fname, ent in dbx_folder.listdir(dbx_path)
+            for fname, ent in children
         ]
-        return render_template("folder.html", title=title, entries=entries)
+        return render_template("folder.html", title=title,
+                               entries=entries, cursor=str(cursor))
     except IsFileError:
         pass
 
@@ -41,6 +44,11 @@ def list_folder(dbx_path=''):
         return simple_download(dbx_path)
     except IsDirError:
         return Response(status=404)
+
+@app.route("/subscribe/<cursor>", methods=['GET'])
+def subscribe(cursor):
+    resp = {'result': 'refresh' if dbx_folder.subscribe(cursor) else 'ok'}
+    return json.dumps(resp)
 
 def simple_download(dbx_path):
     res = blockcache.get(dbx_path)
